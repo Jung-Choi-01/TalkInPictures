@@ -1,18 +1,54 @@
-import speech_recognition as sr
 import tkinter as tk
 from tkinter import Label
+from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
-
-# Initialize recognizer class
-r = sr.Recognizer()
-source = sr.Microphone()
+import queue
+import threading
+import json
+import pyaudio
+from vosk import Model, KaldiRecognizer
+import nltk
+from nltk.stem import WordNetLemmatizer
 
 # Initialize tkinter
 root = tk.Tk()
-root.title("Display Image")
+root.title("TalkInPictures")
 label = Label(root)
 label.pack()
+
+# Initialize models
+if not os.path.exists(os.path.join(os.path.dirname(__file__), 'nltk_data')):
+    messagebox.showerror(
+        "Missing Model",
+        "Please download the WordNet NLTK model and unpack as 'nltk_data/wordnet' in the root directory."
+    )
+    root.destroy()
+    exit(1)
+nltk.data.path.append(os.path.join(os.path.dirname(__file__), 'nltk_data'))
+lemmatizer = WordNetLemmatizer()
+
+vosk_model_path = os.path.join(os.path.dirname(__file__), "vosk-model-small-en-us-0.15")
+if not os.path.exists(vosk_model_path):
+    messagebox.showerror(
+        "Missing Model",
+        "Please download the Vosk model and unpack as 'vosk-model-small-en-us-0.15' in the root directory."
+    )
+    root.destroy()
+    exit(1)
+
+# Word to image processing functions
+images_dir = os.path.join(os.path.dirname(__file__), 'images')
+def display_if_exists(word):
+    lemma_word = lemmatizer.lemmatize(word.lower())
+    for file_name in os.listdir(images_dir):
+        file_stem = file_name.split(".")[0].lower()
+        if file_stem == lemma_word:
+            file_path = os.path.join(images_dir, file_name)
+            # print("Checking path: " + file_path)
+            if os.path.isfile(file_path):
+                display_image(file_path)
+                break
 
 def display_image(image_path):
     image = Image.open(image_path)
@@ -20,25 +56,43 @@ def display_image(image_path):
     label.config(image=photo)
     label.image = photo
 
-images_dir = os.path.join(os.path.dirname(__file__), 'images')
-def display_if_exists(word):
-    for file_name in os.listdir(images_dir):
-        if file_name.startswith(word):
-            file_path = os.path.join(images_dir, file_name)
-            print("Checking path: " + file_path)
-            if os.path.isfile(file_path):
-                display_image(file_path)
-                break
+# Speech to word processing functions
+model = Model(vosk_model_path)
+recognizer = KaldiRecognizer(model, 16000)
+recognizer.SetWords(True)
+q = queue.Queue()
 
-def callback(recognizer, audio):
-    # received audio data, now we'll recognize it using Google Speech Recognition
-    text = recognizer.recognize_sphinx(audio)
-    print("Speech recognized: " + text)
-    
-    for word in text.split():
-        display_if_exists(word)
+def audio_thread():
+    p = pyaudio.PyAudio()
+    stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
+    stream.start_stream()
+    print("Say something!")
+    while True:
+        data = stream.read(4000, exception_on_overflow=False)
+        if recognizer.AcceptWaveform(data):
+            result = recognizer.Result()
+            q.put(result)
+        else:
+            partial = recognizer.PartialResult()
+            q.put(partial)
 
-# Use the microphone as the source
-print("Say something!")
-audio = r.listen_in_background(source, callback)
+def process_results():
+    try:
+        while True:
+            result_json = q.get_nowait()
+            result = json.loads(result_json)
+            # Use 'partial' for interim, 'text' for final
+            text = result.get('partial') or result.get('text')
+            if text:
+                # print("Speech recognized: " + text)
+                words = text.split()[::-1]
+                for word in words:
+                    display_if_exists(word)
+                    break
+    except queue.Empty:
+        pass
+    root.after(100, process_results)
+
+threading.Thread(target=audio_thread, daemon=True).start()
+root.after(100, process_results)
 root.mainloop()
