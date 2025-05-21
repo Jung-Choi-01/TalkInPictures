@@ -14,6 +14,7 @@ from nltk.stem import WordNetLemmatizer
 # Initialize tkinter
 root = tk.Tk()
 root.title("TalkInPictures")
+root.geometry("800x600")
 label = Label(root)
 label.pack()
 
@@ -51,8 +52,19 @@ def display_if_exists(word):
                 break
 
 def display_image(image_path):
+    # Get current window size
+    root.update_idletasks()
+    win_width = root.winfo_width()
+    win_height = root.winfo_height()
+
     image = Image.open(image_path)
-    photo = ImageTk.PhotoImage(image)
+    # Calculate new size while maintaining aspect ratio
+    img_width, img_height = image.size
+    scale = min(win_width / img_width, win_height / img_height, 1)
+    new_size = (int(img_width * scale), int(img_height * scale))
+    resized_image = image.resize(new_size, Image.LANCZOS)
+
+    photo = ImageTk.PhotoImage(resized_image)
     label.config(image=photo)
     label.image = photo
 
@@ -66,7 +78,6 @@ def audio_thread():
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
     stream.start_stream()
-    print("Say something!")
     while True:
         data = stream.read(4000, exception_on_overflow=False)
         if recognizer.AcceptWaveform(data):
