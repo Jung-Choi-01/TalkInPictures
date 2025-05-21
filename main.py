@@ -98,6 +98,7 @@ def process_results():
             text = result.get('partial') or result.get('text')
             if text:
                 # print("Speech recognized: " + text)
+                root.title(text)
                 words = text.split()[::-1]
                 for word in words:
                     display_if_exists(word)
